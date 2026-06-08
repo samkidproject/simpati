@@ -60,10 +60,49 @@ export default function App() {
     return ['samkidproject@gmail.com', 'lukepoktlampung@gmail.com'];
   });
 
-  // Watch and persist allowed emails whitelist
+  const [hasLoadedAllowedEmails, setHasLoadedAllowedEmails] = useState<boolean>(false);
+
+  // Sync Whitelist with Server on startup
   useEffect(() => {
+    const fetchAllowedEmails = async () => {
+      try {
+        const res = await fetch("/api/config/allowed-emails");
+        if (res.ok) {
+          const list: string[] = await res.json();
+          // Always ensure super admins
+          const merged = Array.from(new Set([
+            'samkidproject@gmail.com',
+            'lukepoktlampung@gmail.com',
+            ...list.map(e => e.trim().toLowerCase())
+          ]));
+          setAllowedEmails(merged);
+        }
+      } catch (err) {
+        console.error("Gagal sync allowed_emails dari server:", err);
+      } finally {
+        setHasLoadedAllowedEmails(true);
+      }
+    };
+    fetchAllowedEmails();
+  }, []);
+
+  // Sync Whitelist changes back to Server
+  useEffect(() => {
+    if (!hasLoadedAllowedEmails) return;
     localStorage.setItem('simpati_allowed_emails', JSON.stringify(allowedEmails));
-  }, [allowedEmails]);
+    const saveAllowedEmails = async () => {
+      try {
+        await fetch("/api/config/allowed-emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(allowedEmails)
+        });
+      } catch (err) {
+        console.error("Gagal menyimpan allowed_emails ke server:", err);
+      }
+    };
+    saveAllowedEmails();
+  }, [allowedEmails, hasLoadedAllowedEmails]);
 
   const handleAddAllowedEmail = (email: string) => {
     const clean = email.trim().toLowerCase();
@@ -173,13 +212,8 @@ export default function App() {
     setFaceLoginError(null);
 
     const emailKey = faceLoginEmail.trim().toLowerCase();
-    const referenceImage = localStorage.getItem(`simpati_face_ref_${emailKey}`);
-
-    if (!referenceImage) {
-      setFaceLoginStep('fail');
-      setFaceLoginError("Foto referensi Face ID tidak ditemukan di browser ini. Hubungi super admin untuk mendaftarkan Face ID Anda.");
-      return;
-    }
+    // Fetch local reference image as voluntary optimization helper
+    const referenceImage = localStorage.getItem(`simpati_face_ref_${emailKey}`) || undefined;
 
     try {
       const res = await fetch("/api/auth/face-verify", {
@@ -193,7 +227,8 @@ export default function App() {
       });
 
       if (!res.ok) {
-        throw new Error("Koneksi server gagal");
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Gagal melakukan pencocokan wajah di server.");
       }
 
       const result = await res.json();
@@ -204,6 +239,10 @@ export default function App() {
         setTimeout(() => {
           localStorage.setItem('simpati_user_email', emailKey);
           setCurrentUserEmail(emailKey);
+          // Sync to local storage in case we are logging in on a new device to keep it fast
+          if (result.referenceImage || referenceImage) {
+            localStorage.setItem(`simpati_face_ref_${emailKey}`, result.referenceImage || referenceImage);
+          }
           // resets
           setIsFaceLoginMode(false);
           setFaceLoginEmail('');
@@ -304,6 +343,8 @@ export default function App() {
     localStorage.setItem('simpati_instansi_address', instansiAddress);
   }, [instansiAddress]);
 
+  const [hasLoadedEmployees, setHasLoadedEmployees] = useState<boolean>(false);
+
   // Manage live state of employees list with localStorage persistence to load the latest uploaded data on startup
   const [employeesList, setEmployeesList] = useState<Employee[]>(() => {
     try {
@@ -320,14 +361,47 @@ export default function App() {
     return initialList.map((emp) => enrichEmployeeKgb(emp));
   });
 
-  // Watch and persist employees list
+  // Sync Employees with Server on startup
+  useEffect(() => {
+    const fetchEmployeesFromServer = async () => {
+      try {
+        const res = await fetch("/api/employees");
+        if (res.ok) {
+          const list: Employee[] = await res.json();
+          setEmployeesList(list.map((emp) => enrichEmployeeKgb(emp)));
+        }
+      } catch (err) {
+        console.error("Gagal sync data pegawai dari server TMT:", err);
+      } finally {
+        setHasLoadedEmployees(true);
+      }
+    };
+    fetchEmployeesFromServer();
+  }, []);
+
+  // Watch, persist locally, and synchronize employees list to Server database when changed
   useEffect(() => {
     try {
       localStorage.setItem('simpati_employees_v1', JSON.stringify(employeesList));
     } catch (e) {
       console.error("Gagal menyimpan data ke localStorage:", e);
     }
-  }, [employeesList]);
+
+    if (!hasLoadedEmployees) return;
+
+    const saveEmployeesList = async () => {
+      try {
+        await fetch("/api/employees", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(employeesList)
+        });
+      } catch (err) {
+        console.error("Gagal menyimpan data pegawai ke server:", err);
+      }
+    };
+    saveEmployeesList();
+  }, [employeesList, hasLoadedEmployees]);
 
   // Toggle Dark theme in DOM
   const toggleDarkMode = () => {

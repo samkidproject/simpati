@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "Profil lengkap pegawai Kejaksaan termasuk data TMT, KGB, dan Riwayat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nip": { "type": "string" },
+        "nama": { "type": "string" },
+        "gender": { "type": "string" },
+        "tempatLahir": { "type": "string" },
+        "tanggalLahir": { "type": "string" },
+        "pangkat": { "type": "string" },
+        "golongan": { "type": "string" },
+        "jabatan": { "type": "string" },
+        "tmtJabatan": { "type": "string" },
+        "unitKerja": { "type": "string" },
+        "agama": { "type": "string" },
+        "statusPegawai": { "type": "string" },
+        "email": { "type": "string" },
+        "telepon": { "type": "string" },
+        "alamat": { "type": "string" },
+        "kgbTerakhir": { "type": "string" },
+        "kgbYAD": { "type": "string" },
+        "pangkatTerakhir": { "type": "string" },
+        "pangkatYAD": { "type": "string" },
+        "pensiunTMT": { "type": "string" },
+        "foto": { "type": "string" }
+      },
+      "required": ["id", "nip", "nama"]
+    },
+    "AllowedEmail": {
+      "title": "AllowedEmail",
+      "description": "Daftar putih alamat email yang diizinkan untuk mengakses sistem simPATI",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "FaceReference": {
+      "title": "FaceReference",
+      "description": "Biometrik Face ID referensi untuk pencocokan pengenalan wajah pengguna",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "referenceImage": { "type": "string" }
+      },
+      "required": ["email", "referenceImage"]
+    }
+  },
+  "firestore": {
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Koleksi pangkalan data personil pegawai Kejaksaan secara keseluruhan"
+    },
+    "/allowed_emails/{emailId}": {
+      "schema": "AllowedEmail",
+      "description": "Koleksi daftar putih otorisasi login email sistem"
+    },
+    "/face_references/{emailId}": {
+      "schema": "FaceReference",
+      "description": "Penyimpanan biometrik Face ID terdaftar per email"
+    }
+  }
+}

@@ -21,6 +21,17 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+// Configure CORS for multi-device cross-origin connectivity (Vercel, mobiles, external web browsers)
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 import fs from "fs";
 
 // Storage File Paths inside workspace data folder
@@ -38,8 +49,8 @@ function loadEmployees() {
   } catch (err) {
     console.error("Gagal membaca file database karyawan:", err);
   }
-  // Initialize from default rich employees list if no file exists
-  const defaultList = generateRichEmployees();
+  // Initialize from empty list to remove default sample data
+  const defaultList: any[] = [];
   saveEmployees(defaultList);
   return defaultList;
 }
@@ -207,7 +218,7 @@ app.delete("/api/config/face-reference/:email", (req, res) => {
   }
 });
 
-// 3. PEGAWAY AI Query endpoint
+// 3. SIMPATI AI Query endpoint
 app.post("/api/ai/query", async (req, res) => {
   try {
     const { message, chatHistory } = req.body;
@@ -242,7 +253,7 @@ app.post("/api/ai/query", async (req, res) => {
       return `${index + 1}. NIP: ${e.nip} | Nama: ${e.nama} | Golongan-Pangkat: ${e.golongan}-${e.pangkat} | Jabatan: ${e.jabatan} | Unit Kerja: ${e.unitKerja} | KGB YAD: ${e.kgbYAD} | Pangkat YAD: ${e.pangkatYAD} | Pensiun TMT: ${e.pensiunTMT} | Lahir: ${e.tanggalLahir} | Gender: ${e.gender} | Status: ${e.statusPegawai}`;
     }).join("\n");
 
-    const systemInstruction = `Kamu adalah PEGAWAY AI, asisten pintar manajemen kepegawaian (Smart ASN Assistant) untuk sistem kepegawaian Indonesia (seperti MySAPK BKN modern).
+    const systemInstruction = `Kamu adalah SIMPATI AI, asisten pintar manajemen kepegawaian (Smart ASN Assistant) untuk sistem kepegawaian Indonesia (seperti MySAPK BKN modern).
 Tugasmu adalah membantu admin mengelola dan mencari informasi data kepegawaian secara instan dengan bahasa alami.
 
 Tanggal hari ini (Current Date): 2026-06-04 (Kamis, 4 Juni 2026). Gunakan tanggal ini untuk menghitung kriteria seperti "bulan depan", "tahun ini", "menjelang pensiun", atau "jatuh tempo".
@@ -424,7 +435,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[PEGAWAY SERVER] Running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+    console.log(`[SIMPATI SERVER] Running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   });
 }
 

@@ -7,6 +7,15 @@ import React, { useState, useEffect, useMemo, FormEvent } from 'react';
 import { generateRichEmployees } from './data/employees';
 import { enrichEmployeeKgb } from './utils/kgbUtils';
 import { Employee } from './types';
+import {
+  fetchAllowedEmailsFromFirestore,
+  syncAllowedEmailsToFirestore,
+  fetchEmployeesFromFirestore,
+  syncEmployeesToFirestore,
+  fetchFaceReferenceFromFirestore,
+  saveFaceReferenceToFirestore,
+  deleteFaceReferenceFromFirestore
+} from './lib/firestoreService';
 import Sidebar from './components/Sidebar';
 import BottomNav from './components/BottomNav';
 import DashboardTab from './components/DashboardTab';
@@ -23,7 +32,7 @@ export default function App() {
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState<boolean>(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     // Read from localStorage to persist
-    const saved = localStorage.getItem('simpati_dark_mode') || localStorage.getItem('pegaway_dark_mode');
+    const saved = localStorage.getItem('simpati_dark_mode');
     return saved === 'true';
   });
 
@@ -62,46 +71,39 @@ export default function App() {
 
   const [hasLoadedAllowedEmails, setHasLoadedAllowedEmails] = useState<boolean>(false);
 
-  // Sync Whitelist with Server on startup
+  // Sync Whitelist with Cloud Firestore on startup
   useEffect(() => {
-    const fetchAllowedEmails = async () => {
+    const loadWhitelist = async () => {
       try {
-        const res = await fetch("/api/config/allowed-emails");
-        if (res.ok) {
-          const list: string[] = await res.json();
-          // Always ensure super admins
-          const merged = Array.from(new Set([
-            'samkidproject@gmail.com',
-            'lukepoktlampung@gmail.com',
-            ...list.map(e => e.trim().toLowerCase())
-          ]));
-          setAllowedEmails(merged);
-        }
+        const list = await fetchAllowedEmailsFromFirestore();
+        // Always ensure super admins
+        const merged = Array.from(new Set([
+          'samkidproject@gmail.com',
+          'lukepoktlampung@gmail.com',
+          ...list.map(e => e.trim().toLowerCase())
+        ]));
+        setAllowedEmails(merged);
       } catch (err) {
-        console.error("Gagal sync allowed_emails dari server:", err);
+        console.error("Gagal sync allowed_emails dari Firestore:", err);
       } finally {
         setHasLoadedAllowedEmails(true);
       }
     };
-    fetchAllowedEmails();
+    loadWhitelist();
   }, []);
 
-  // Sync Whitelist changes back to Server
+  // Sync Whitelist changes back to Cloud Firestore
   useEffect(() => {
     if (!hasLoadedAllowedEmails) return;
     localStorage.setItem('simpati_allowed_emails', JSON.stringify(allowedEmails));
-    const saveAllowedEmails = async () => {
+    const saveWhitelist = async () => {
       try {
-        await fetch("/api/config/allowed-emails", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(allowedEmails)
-        });
+        await syncAllowedEmailsToFirestore(allowedEmails);
       } catch (err) {
-        console.error("Gagal menyimpan allowed_emails ke server:", err);
+        console.error("Gagal menyimpan allowed_emails ke Firestore:", err);
       }
     };
-    saveAllowedEmails();
+    saveWhitelist();
   }, [allowedEmails, hasLoadedAllowedEmails]);
 
   const handleAddAllowedEmail = (email: string) => {
@@ -207,16 +209,32 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const getApiUrl = (endpoint: string): string => {
+    const host = window.location.hostname;
+    const isInternal = host === "localhost" || host === "127.0.0.1" || host.includes("asia-east1.run.app") || host.includes(".run.app");
+    if (isInternal) {
+      return endpoint;
+    }
+    return `https://ais-dev-6owthlexa57dc46oumj7fr-263187568059.asia-east1.run.app${endpoint}`;
+  };
+
   const handleVerifyFaceBiometrics = async (capturedBase64: string) => {
     setFaceLoginStep('verifying');
     setFaceLoginError(null);
 
     const emailKey = faceLoginEmail.trim().toLowerCase();
-    // Fetch local reference image as voluntary optimization helper
-    const referenceImage = localStorage.getItem(`simpati_face_ref_${emailKey}`) || undefined;
 
     try {
-      const res = await fetch("/api/auth/face-verify", {
+      // Fetch Face ID photo reference from Cloud Firestore (enabling cross-device login)
+      const referenceImage = await fetchFaceReferenceFromFirestore(emailKey) || 
+                             localStorage.getItem(`simpati_face_ref_${emailKey}`) || 
+                             undefined;
+
+      if (!referenceImage) {
+        throw new Error("Foto referensi Face ID belum terdaftar di database cloud untuk email ini. Silakan hubungi Super Admin di tab Pengaturan.");
+      }
+
+      const res = await fetch(getApiUrl("/api/auth/face-verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -348,7 +366,7 @@ export default function App() {
   // Manage live state of employees list with localStorage persistence to load the latest uploaded data on startup
   const [employeesList, setEmployeesList] = useState<Employee[]>(() => {
     try {
-      const saved = localStorage.getItem('simpati_employees_v1') || localStorage.getItem('pegaway_employees_v1');
+      const saved = localStorage.getItem('simpati_employees_v1');
       if (saved) {
         const parsed: Employee[] = JSON.parse(saved);
         return parsed.map((emp) => enrichEmployeeKgb(emp));
@@ -356,30 +374,31 @@ export default function App() {
     } catch (e) {
       console.error("Gagal memuat data dari localStorage:", e);
     }
-    // Fallback: load initialized rich employees list and automatically calculate all KGB details
-    const initialList = generateRichEmployees();
-    return initialList.map((emp) => enrichEmployeeKgb(emp));
+    // Fallback: start with empty array as requested to remove default sample data
+    return [];
   });
 
-  // Sync Employees with Server on startup
+  // Sync Employees with Cloud Firestore on startup
   useEffect(() => {
-    const fetchEmployeesFromServer = async () => {
+    const fetchEmployeesFromCloud = async () => {
       try {
-        const res = await fetch("/api/employees");
-        if (res.ok) {
-          const list: Employee[] = await res.json();
+        const list = await fetchEmployeesFromFirestore();
+        if (list && list.length > 0) {
           setEmployeesList(list.map((emp) => enrichEmployeeKgb(emp)));
+        } else {
+          // If Firestore became empty (custom wiped), set empty state
+          setEmployeesList([]);
         }
       } catch (err) {
-        console.error("Gagal sync data pegawai dari server TMT:", err);
+        console.error("Gagal sync data pegawai dari Firestore:", err);
       } finally {
         setHasLoadedEmployees(true);
       }
     };
-    fetchEmployeesFromServer();
+    fetchEmployeesFromCloud();
   }, []);
 
-  // Watch, persist locally, and synchronize employees list to Server database when changed
+  // Watch, persist locally, and synchronize employees list to Cloud Firestore database when changed
   useEffect(() => {
     try {
       localStorage.setItem('simpati_employees_v1', JSON.stringify(employeesList));
@@ -391,13 +410,9 @@ export default function App() {
 
     const saveEmployeesList = async () => {
       try {
-        await fetch("/api/employees", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(employeesList)
-        });
+        await syncEmployeesToFirestore(employeesList);
       } catch (err) {
-        console.error("Gagal menyimpan data pegawai ke server:", err);
+        console.error("Gagal menyimpan data pegawai ke Firestore:", err);
       }
     };
     saveEmployeesList();

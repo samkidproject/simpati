@@ -204,7 +204,11 @@ export default function AiTab({ darkMode }: AiTabProps) {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/ai/query', {
+      const host = window.location.hostname;
+      const isInternal = host === "localhost" || host === "127.0.0.1" || host.includes("asia-east1.run.app") || host.includes(".run.app");
+      const apiEndpoint = isInternal ? '/api/ai/query' : 'https://ais-dev-6owthlexa57dc46oumj7fr-263187568059.asia-east1.run.app/api/ai/query';
+
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

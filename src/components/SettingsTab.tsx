@@ -3,10 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Building, MapPin, CheckCircle, Save, Info, Award, Settings, Shield, Trash2, Plus, Users, Lock, ShieldCheck, Camera, X, RefreshCw, AlertCircle, Check, Upload, Database } from 'lucide-react';
 import { Employee } from '../types';
 import { parseExcelToEmployees } from '../utils/excelParser';
+import { 
+  fetchRegisteredFaceEmailsFromFirestore, 
+  saveFaceReferenceToFirestore, 
+  deleteFaceReferenceFromFirestore 
+} from '../lib/firestoreService';
 
 interface SettingsTabProps {
   instansiName: string;
@@ -121,6 +126,21 @@ export default function SettingsTab({
     return allowedEmails.filter(email => !!localStorage.getItem(`simpati_face_ref_${email}`));
   });
 
+  // Load the list of registered Face ID profiles from Cloud Firestore
+  useEffect(() => {
+    const loadFaceRegistrations = async () => {
+      try {
+        const cloudFaces = await fetchRegisteredFaceEmailsFromFirestore();
+        const localFaces = allowedEmails.filter(email => !!localStorage.getItem(`simpati_face_ref_${email}`));
+        const combined = Array.from(new Set([...cloudFaces, ...localFaces]));
+        setRegisteredFaces(combined);
+      } catch (e) {
+        console.error("Gagal sinkron data Face ID dari cloud:", e);
+      }
+    };
+    loadFaceRegistrations();
+  }, [allowedEmails]);
+
   const [activeFaceRegEmail, setActiveFaceRegEmail] = useState<string | null>(null);
   const [regMode, setRegMode] = useState<'camera' | 'upload'>('upload'); // default to upload because iframes restrict camera
   const [cameraActive, setCameraActive] = useState(false);
@@ -197,24 +217,40 @@ export default function SettingsTab({
     reader.readAsDataURL(file);
   };
 
-  const saveFaceReference = () => {
+  const saveFaceReference = async () => {
     if (activeFaceRegEmail && capturedImage) {
-      localStorage.setItem(`simpati_face_ref_${activeFaceRegEmail}`, capturedImage);
-      setRegisteredFaces(prev => {
-        if (prev.includes(activeFaceRegEmail)) return prev;
-        return [...prev, activeFaceRegEmail];
-      });
-      setActionSuccess(`Face ID untuk "${activeFaceRegEmail}" berhasil terdaftar!`);
-      setTimeout(() => setActionSuccess(null), 3500);
-      closeFaceRegistration();
+      try {
+        localStorage.setItem(`simpati_face_ref_${activeFaceRegEmail}`, capturedImage);
+        await saveFaceReferenceToFirestore(activeFaceRegEmail, capturedImage);
+
+        setRegisteredFaces(prev => {
+          if (prev.includes(activeFaceRegEmail)) return prev;
+          return [...prev, activeFaceRegEmail];
+        });
+        setActionSuccess(`Face ID untuk "${activeFaceRegEmail}" berhasil terdaftar di cloud & perangkat ini!`);
+        setTimeout(() => setActionSuccess(null), 3500);
+        closeFaceRegistration();
+      } catch (err: any) {
+        console.error(err);
+        setActionSuccess(`Gagal mengunggah Face ID ke Cloud: ${err.message || err}`);
+        setTimeout(() => setActionSuccess(null), 4500);
+      }
     }
   };
 
-  const deleteFaceReference = (email: string) => {
-    localStorage.removeItem(`simpati_face_ref_${email}`);
-    setRegisteredFaces(prev => prev.filter(e => e !== email));
-    setActionSuccess(`Data Face ID untuk "${email}" telah dihapus.`);
-    setTimeout(() => setActionSuccess(null), 3500);
+  const deleteFaceReference = async (email: string) => {
+    try {
+      localStorage.removeItem(`simpati_face_ref_${email}`);
+      await deleteFaceReferenceFromFirestore(email);
+
+      setRegisteredFaces(prev => prev.filter(e => e !== email));
+      setActionSuccess(`Data Face ID untuk "${email}" telah dihapus dari cloud.`);
+      setTimeout(() => setActionSuccess(null), 3500);
+    } catch (err: any) {
+      console.error(err);
+      setActionSuccess(`Gagal menghapus dari cloud: ${err.message || err}`);
+      setTimeout(() => setActionSuccess(null), 4500);
+    }
   };
 
   const closeFaceRegistration = () => {

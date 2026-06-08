@@ -17,22 +17,194 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-// Enable JSON parsing
-app.use(express.json());
+// Enable JSON parsing with higher limit for image base64 and excel imports
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// In-memory caching/store of employee database
-const richEmployees = generateRichEmployees();
+import fs from "fs";
+
+// Storage File Paths inside workspace data folder
+const EMPLOYEES_FILE = path.join(process.cwd(), "src", "data", "employees_db.json");
+const ALLOWED_EMAILS_FILE = path.join(process.cwd(), "src", "data", "allowed_emails.json");
+const FACE_REFS_FILE = path.join(process.cwd(), "src", "data", "face_references.json");
+
+// Helper: load employees
+function loadEmployees() {
+  try {
+    if (fs.existsSync(EMPLOYEES_FILE)) {
+      const data = fs.readFileSync(EMPLOYEES_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Gagal membaca file database karyawan:", err);
+  }
+  // Initialize from default rich employees list if no file exists
+  const defaultList = generateRichEmployees();
+  saveEmployees(defaultList);
+  return defaultList;
+}
+
+// Helper: save employees
+function saveEmployees(list: any[]) {
+  try {
+    const dir = path.dirname(EMPLOYEES_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(EMPLOYEES_FILE, JSON.stringify(list, null, 2), "utf-8");
+    return true;
+  } catch (err) {
+    console.error("Gagal menulis file database karyawan:", err);
+    return false;
+  }
+}
+
+// Helper: load allowed emails
+function loadAllowedEmails() {
+  try {
+    if (fs.existsSync(ALLOWED_EMAILS_FILE)) {
+      const data = fs.readFileSync(ALLOWED_EMAILS_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Gagal membaca file daftar email diizinkan:", err);
+  }
+  const defaultList = ["samkidproject@gmail.com", "lukepoktlampung@gmail.com"];
+  saveAllowedEmails(defaultList);
+  return defaultList;
+}
+
+// Helper: save allowed emails
+function saveAllowedEmails(list: string[]) {
+  try {
+    const dir = path.dirname(ALLOWED_EMAILS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(ALLOWED_EMAILS_FILE, JSON.stringify(list, null, 2), "utf-8");
+    return true;
+  } catch (err) {
+    console.error("Gagal menulis file daftar email diizinkan:", err);
+    return false;
+  }
+}
+
+// Helper: load face references
+function loadFaceReferences() {
+  try {
+    if (fs.existsSync(FACE_REFS_FILE)) {
+      const data = fs.readFileSync(FACE_REFS_FILE, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error("Gagal membaca file foto referensi biometrik:", err);
+  }
+  const defaultRefs = {};
+  saveFaceReferences(defaultRefs);
+  return defaultRefs;
+}
+
+// Helper: save face references
+function saveFaceReferences(refs: Record<string, string>) {
+  try {
+    const dir = path.dirname(FACE_REFS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(FACE_REFS_FILE, JSON.stringify(refs, null, 2), "utf-8");
+    return true;
+  } catch (err) {
+    console.error("Gagal menulis file foto referensi biometrik:", err);
+    return false;
+  }
+}
+
+// In-memory cache of employee database loaded initially
+let richEmployees = loadEmployees();
 
 // --- API ENDPOINTS ---
 
 // 1. Health check
 app.get("/api/health", (req, res) => {
+  richEmployees = loadEmployees();
   res.json({ status: "ok", count: richEmployees.length });
 });
 
-// 2. Fetch full list of rich profiles
+// 2. Fetch full list of rich profiles from server storage
 app.get("/api/employees", (req, res) => {
+  richEmployees = loadEmployees();
   res.json(richEmployees);
+});
+
+// 2b. Update employees from client
+app.post("/api/employees", (req, res) => {
+  const newList = req.body;
+  if (Array.isArray(newList)) {
+    richEmployees = newList;
+    saveEmployees(newList);
+    res.json({ success: true, count: newList.length });
+  } else {
+    res.status(400).json({ error: "Data harus berupa array pegawai." });
+  }
+});
+
+// 2c. Fetch allowed emails whitelist
+app.get("/api/config/allowed-emails", (req, res) => {
+  const list = loadAllowedEmails();
+  res.json(list);
+});
+
+// 2d. Update allowed emails whitelist
+app.post("/api/config/allowed-emails", (req, res) => {
+  const newList = req.body;
+  if (Array.isArray(newList)) {
+    saveAllowedEmails(newList);
+    res.json({ success: true, count: newList.length });
+  } else {
+    res.status(400).json({ error: "Data harus berupa array email." });
+  }
+});
+
+// 2e. List registered Face ID emails
+app.get("/api/config/face-references", (req, res) => {
+  const refs = loadFaceReferences();
+  res.json(Object.keys(refs));
+});
+
+// 2f. Fetch details for a registered Face ID
+app.get("/api/config/face-reference/:email", (req, res) => {
+  const { email } = req.params;
+  const cleanEmail = email.trim().toLowerCase();
+  const refs = loadFaceReferences();
+  const referenceImage = refs[cleanEmail] || null;
+  res.json({ email: cleanEmail, referenceImage });
+});
+
+// 2g. Update/save biometric Face ID reference
+app.post("/api/config/face-reference", (req, res) => {
+  const { email, referenceImage } = req.body;
+  if (!email || !referenceImage) {
+    return res.status(400).json({ error: "Email dan Foto Referensi diperlukan." });
+  }
+  const cleanEmail = email.trim().toLowerCase();
+  const refs = loadFaceReferences();
+  refs[cleanEmail] = referenceImage;
+  saveFaceReferences(refs);
+  res.json({ success: true, message: `Face ID untuk ${cleanEmail} telah terdaftar.` });
+});
+
+// 2h. Delete Face ID reference
+app.delete("/api/config/face-reference/:email", (req, res) => {
+  const { email } = req.params;
+  const cleanEmail = email.trim().toLowerCase();
+  const refs = loadFaceReferences();
+  if (refs[cleanEmail]) {
+    delete refs[cleanEmail];
+    saveFaceReferences(refs);
+    res.json({ success: true, message: `Face ID untuk ${cleanEmail} telah dihapus.` });
+  } else {
+    res.status(404).json({ error: "Face ID tidak ditemukan." });
+  }
 });
 
 // 3. PEGAWAY AI Query endpoint
@@ -42,6 +214,9 @@ app.post("/api/ai/query", async (req, res) => {
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
     }
+
+    // Refresh memory cache from storage file so AI has the latest imported/updated database
+    richEmployees = loadEmployees();
 
     // Check if API Key is configured
     const apiKey = process.env.GEMINI_API_KEY;
@@ -127,9 +302,21 @@ Aturan Menjawab:
 // 4. Biometric Face Verification Comparison endpoint
 app.post("/api/auth/face-verify", async (req, res) => {
   try {
-    const { email, capturedImage, referenceImage } = req.body;
-    if (!email || !capturedImage || !referenceImage) {
-      return res.status(400).json({ error: "Email, Tangkapan Kamera, dan Foto Referensi diperlukan." });
+    let { email, capturedImage, referenceImage } = req.body;
+    if (!email || !capturedImage) {
+      return res.status(400).json({ error: "Email dan Tangkapan Kamera diperlukan." });
+    }
+
+    const emailKey = email.trim().toLowerCase();
+
+    // Look up the reference image in the server database if not provided inside request parameters
+    if (!referenceImage) {
+      const refs = loadFaceReferences();
+      referenceImage = refs[emailKey];
+    }
+
+    if (!referenceImage) {
+      return res.status(400).json({ error: "Foto referensi Face ID tidak terdaftar untuk email " + emailKey + " di database server." });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -200,6 +387,7 @@ Respons HARUS berupa JSON murni dengan format exact seperti ini:
     const jsonStr = response.text || "{}";
     try {
       const result = JSON.parse(jsonStr.trim());
+      result.referenceImage = referenceImage;
       res.json(result);
     } catch (e) {
       console.error("Malformed JSON received from Gemini:", jsonStr);

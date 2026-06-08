@@ -1,0 +1,6 @@
+{
+  "name": "simpati",
+  "description": "SIMPATI - Sistem Monitoring Pegawai Terintegrasi",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
